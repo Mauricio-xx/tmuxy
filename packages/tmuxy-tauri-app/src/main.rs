@@ -46,6 +46,10 @@ fn main() {
         // packaged .app needs no separate `tmuxy-connect` binary on PATH.
         Some("connect") if args.len() == 1 => cli::run_connect_form(),
 
+        // "project" groups session names. It only edits projects.json, so it
+        // stays in-process instead of going through the shell dispatcher.
+        Some("project") => cli::run_project(&args),
+
         // Known CLI nouns and flags → exec the shell dispatcher
         Some(cmd) if is_cli_subcommand(cmd) => {
             cli::run_cli(args);

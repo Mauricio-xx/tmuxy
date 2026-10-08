@@ -23,7 +23,7 @@
  * where the rest of the session's commands are.
  */
 
-import type React from 'react';
+import { Fragment, type RefObject } from 'react';
 import { FloatingMenu, MenuItem, MenuDivider, MenuHeader } from './floating/Menu';
 import {
   useAppSend,
@@ -33,6 +33,7 @@ import {
   selectSessions,
 } from '../machines/AppContext';
 import { isTauri } from '../tmux/adapters';
+import { groupSessions, useSessionProjects } from '../projects';
 
 interface SessionMenuProps {
   /**
@@ -44,7 +45,7 @@ interface SessionMenuProps {
    */
   // `useRef<T>(null)` yields `RefObject<T | null>`; the menu reads `.current`
   // only once it is open, by which point React has attached the element.
-  anchorRef: React.RefObject<HTMLElement | null>;
+  anchorRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }
 
@@ -55,10 +56,13 @@ export function SessionMenu({ anchorRef, onClose }: SessionMenuProps) {
   const sessions = useAppSelectorShallow(selectSessions);
   const servers = useAppSelectorShallow((ctx) => ctx.servers);
   const currentServerId = useAppSelector((ctx) => ctx.currentServerId);
+  const projects = useSessionProjects();
 
   // Before the poll has answered — and on a sandbox that enumerates nothing —
   // the attached session is still the one we know for certain.
   const names = sessions.length > 0 ? sessions.map((s) => s.sessionName) : [sessionName];
+  const grouped = groupSessions(names, projects);
+  const hasProject = grouped.some((row) => row.project !== null);
 
   const switchTo = (name: string) => {
     if (name !== sessionName) send({ type: 'SWITCH_SESSION', sessionName: name });
@@ -87,23 +91,33 @@ export function SessionMenu({ anchorRef, onClose }: SessionMenuProps) {
       onClose={onClose}
       ignoreRef={anchorRef}
     >
-      <MenuHeader>Sessions</MenuHeader>
-      {names.map((name) => {
-        const current = name === sessionName;
+      {!hasProject && <MenuHeader>Sessions</MenuHeader>}
+      {grouped.map((row, index) => {
+        const current = row.name === sessionName;
+        const heading =
+          row.project !== null && (index === 0 || grouped[index - 1].project !== row.project);
+        const looseHeading =
+          row.project === null &&
+          hasProject &&
+          (index === 0 || grouped[index - 1].project !== null);
         return (
-          <MenuItem
-            key={name}
-            onClick={() => switchTo(name)}
-            // Switching is a `switch-client`: a change to this client alone,
-            // which is why a viewer may do it as freely as a writer.
-            data-session-name={name}
-            data-current={current || undefined}
-          >
-            {/* The same filled/hollow mark the theme items use, so "which one
-                am I on" reads the same everywhere in the menus. */}
-            {current ? '● ' : '○ '}
-            {name}
-          </MenuItem>
+          <Fragment key={row.name}>
+            {heading && <MenuHeader>{row.project}</MenuHeader>}
+            {looseHeading && <MenuHeader>Sessions</MenuHeader>}
+            <MenuItem
+              onClick={() => switchTo(row.name)}
+              // Switching is a `switch-client`: a change to this client alone,
+              // which is why a viewer may do it as freely as a writer.
+              data-session-name={row.name}
+              data-project={row.project ?? undefined}
+              data-current={current || undefined}
+            >
+              {/* The same filled/hollow mark the theme items use, so "which one
+                  am I on" reads the same everywhere in the menus. */}
+              {current ? '● ' : '○ '}
+              {row.name}
+            </MenuItem>
+          </Fragment>
         );
       })}
       {showServers && (

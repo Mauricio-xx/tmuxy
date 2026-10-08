@@ -203,6 +203,7 @@ Commands:
   pane          Pane operations (split, kill, select, resize, ...)
   tab           Tab operations (create, kill, select, rename, ...)
   session       Session management (switch, connect)
+  project       Group sessions into projects (list, new, rm, assign, unassign)
   widget        Display widgets (image, markdown)
   nav           Navigation (left, right, up, down, next, prev)
   queue, q      Inter-agent coordination queue (push/send, pop, peek, list, clear)
@@ -225,4 +226,113 @@ Run 'tmuxy <command> --help' for details on each command."
 
 pub fn print_version() {
     println!("tmuxy {}", VERSION);
+}
+
+/// `tmuxy project` edits `~/.config/tmuxy/projects.json`. Handled here, not by
+/// the shell dispatcher: the file format lives in `tmuxy_core::projects`.
+pub fn run_project(args: &[String]) {
+    let rest = &args[1..];
+    let verb = rest.first().map(String::as_str).unwrap_or("list");
+    let result = match verb {
+        "list" | "ls" => {
+            print_projects();
+            return;
+        }
+        "--json" => {
+            match tmuxy_core::projects::list() {
+                Ok(projects) => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&projects).unwrap_or_default()
+                ),
+                Err(e) => {
+                    eprintln!("tmuxy project: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        "new" | "add" => tmuxy_core::projects::create(&join_words(&rest[1..])),
+        "rm" | "remove" | "delete" => tmuxy_core::projects::remove(&join_words(&rest[1..])),
+        "assign" | "add-session" => match split_project_session(&rest[1..]) {
+            Ok((project, session)) => tmuxy_core::projects::assign(&project, &session),
+            Err(e) => Err(e),
+        },
+        "unassign" | "remove-session" => tmuxy_core::projects::unassign(&join_words(&rest[1..])),
+        "-h" | "--help" | "help" => {
+            print_project_help();
+            return;
+        }
+        other => Err(format!(
+            "unknown project command '{other}'\n\n{}",
+            project_help()
+        )),
+    };
+    if let Err(e) = result {
+        eprintln!("tmuxy project: {e}");
+        std::process::exit(1);
+    }
+    print_projects();
+}
+
+fn print_projects() {
+    match tmuxy_core::projects::list() {
+        Ok(projects) if projects.is_empty() => {
+            println!("no projects yet. create one with: tmuxy project new <name>");
+        }
+        Ok(projects) => {
+            for project in projects {
+                println!("{}", project.name);
+                if project.sessions.is_empty() {
+                    println!("  (no sessions)");
+                } else {
+                    for session in project.sessions {
+                        println!("  {session}");
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("tmuxy project: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_project_help() {
+    println!("{}", project_help());
+}
+
+fn project_help() -> &'static str {
+    "Usage: tmuxy project <command>
+
+Commands:
+  list                         Show projects and the sessions in each
+  new <name>                   Create an empty project
+  rm <name>                    Remove a project (sessions themselves stay)
+  assign <project> <session>   Put a session in a project, moving it if needed
+  unassign <session>           Take a session out of its project
+
+Names with spaces are several words: the last word of `assign` is the
+session, and the words before it are the project. Quote either one to
+keep a space inside it.
+
+Stored in ~/.config/tmuxy/projects.json. This does not create tmux
+sessions and does not link them; it only records which names belong
+together. The session switcher groups the ones that exist."
+}
+
+fn join_words(words: &[String]) -> String {
+    words.join(" ")
+}
+
+/// `assign <project words...> <session>`. The last word is the session.
+fn split_project_session(words: &[String]) -> Result<(String, String), String> {
+    if words.len() < 2 {
+        return Err(
+            "usage: tmuxy project assign <project> <session>\n\n".to_string() + project_help(),
+        );
+    }
+    let session = words.last().cloned().unwrap_or_default();
+    let project = words[..words.len() - 1].join(" ");
+    Ok((project, session))
 }

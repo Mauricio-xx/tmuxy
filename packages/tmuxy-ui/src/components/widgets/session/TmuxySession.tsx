@@ -22,7 +22,7 @@
  * keyboard actor, so j/k never reach tmux.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useAppSend,
   useAppSelector,
@@ -32,10 +32,11 @@ import {
   useReadOnly,
 } from '../../../machines/AppContext';
 import { InlineRename } from '../../InlineRename';
+import { groupSessions, useSessionProjects } from '../../../projects';
 
 /** A row in the switcher: a session on this server, or another server. */
 type Row =
-  | { kind: 'session'; name: string; windows: number; current: boolean }
+  | { kind: 'session'; name: string; windows: number; current: boolean; project: string | null }
   | { kind: 'server'; id: string; label: string; detail: string; current: boolean };
 
 export const TmuxySession = memo(function TmuxySession() {
@@ -44,6 +45,7 @@ export const TmuxySession = memo(function TmuxySession() {
   const servers = useAppSelectorShallow((ctx) => ctx.servers);
   const currentServerId = useAppSelector((ctx) => ctx.currentServerId);
   const sessionName = useAppSelector((ctx) => ctx.sessionName);
+  const projects = useSessionProjects();
   // Hosted by the detached overlay rather than by a float, which changes what
   // activating a row means — see `activate`.
   const detached = useAppState('detached');
@@ -61,13 +63,14 @@ export const TmuxySession = memo(function TmuxySession() {
     // Before the poll has answered (or on a sandbox that enumerates nothing)
     // the attached session is still worth listing — it is the one we know.
     const names = sessions.length > 0 ? sessions.map((s) => s.sessionName) : [sessionName];
-    return names.map((name) => ({
+    return groupSessions(names, projects).map((row) => ({
       kind: 'session' as const,
-      name,
-      windows: sessions.find((s) => s.sessionName === name)?.windows.length ?? 0,
-      current: name === sessionName,
+      name: row.name,
+      project: row.project,
+      windows: sessions.find((s) => s.sessionName === row.name)?.windows.length ?? 0,
+      current: row.name === sessionName,
     }));
-  }, [sessions, sessionName]);
+  }, [sessions, sessionName, projects]);
 
   const serverRows = useMemo<Row[]>(
     () =>
@@ -258,38 +261,46 @@ export const TmuxySession = memo(function TmuxySession() {
       <div className="widget-session-list">
         {sessionRows.map((row, i) => {
           const isSelected = rows[cursor] === row;
+          const project = row.kind === 'session' ? row.project : null;
+          const earlier = i > 0 ? sessionRows[i - 1] : undefined;
+          const previous = earlier?.kind === 'session' ? earlier.project : undefined;
+          const showProject = project !== null && project !== previous;
           return (
-            <div
-              key={`s:${row.kind === 'session' ? row.name : ''}`}
-              role="option"
-              aria-selected={isSelected}
-              className={`widget-session-row${isSelected ? ' is-selected' : ''}${
-                row.current ? ' is-current' : ''
-              }`}
-              data-testid={`session-row-${row.kind === 'session' ? row.name : ''}`}
-              onClick={() => {
-                setCursor(i);
-                activate(row);
-              }}
-            >
-              {renaming && isSelected && row.kind === 'session' ? (
-                <InlineRename
-                  value={row.name}
-                  ariaLabel={`Rename session ${row.name}`}
-                  onCommit={commitRename}
-                  onCancel={() => setRenaming(false)}
-                />
-              ) : (
-                <>
-                  <span className="widget-session-name">{row.kind === 'session' && row.name}</span>
-                  <span className="widget-session-meta">
-                    {row.kind === 'session' && row.windows > 0
-                      ? `${row.windows} window${row.windows === 1 ? '' : 's'}`
-                      : ''}
-                  </span>
-                </>
-              )}
-            </div>
+            <Fragment key={`s:${row.kind === 'session' ? row.name : ''}`}>
+              {showProject && <div className="widget-session-heading">{project}</div>}
+              <div
+                role="option"
+                aria-selected={isSelected}
+                className={`widget-session-row${isSelected ? ' is-selected' : ''}${
+                  row.current ? ' is-current' : ''
+                }`}
+                data-testid={`session-row-${row.kind === 'session' ? row.name : ''}`}
+                onClick={() => {
+                  setCursor(i);
+                  activate(row);
+                }}
+              >
+                {renaming && isSelected && row.kind === 'session' ? (
+                  <InlineRename
+                    value={row.name}
+                    ariaLabel={`Rename session ${row.name}`}
+                    onCommit={commitRename}
+                    onCancel={() => setRenaming(false)}
+                  />
+                ) : (
+                  <>
+                    <span className="widget-session-name">
+                      {row.kind === 'session' && row.name}
+                    </span>
+                    <span className="widget-session-meta">
+                      {row.kind === 'session' && row.windows > 0
+                        ? `${row.windows} window${row.windows === 1 ? '' : 's'}`
+                        : ''}
+                    </span>
+                  </>
+                )}
+              </div>
+            </Fragment>
           );
         })}
       </div>

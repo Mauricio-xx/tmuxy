@@ -346,6 +346,13 @@ pub fn get_keybindings_snapshot(state: State<'_, KeyBindingsState>) -> Option<Va
     state.0.read().ok().and_then(|guard| guard.clone())
 }
 
+/// Projects from `~/.config/tmuxy/projects.json`, for the session switcher.
+/// A missing or unreadable file is an empty list so the menu still opens.
+#[tauri::command]
+pub fn list_projects() -> Vec<tmuxy_core::projects::Project> {
+    tmuxy_core::projects::read_projects()
+}
+
 /// List the saved servers (localhost plus any added via `tmuxy connect`), read
 /// fresh from `~/.config/tmuxy/servers.json`, along with the id of the server
 /// the app is currently attached to. Powers the sidebar server picker — a
